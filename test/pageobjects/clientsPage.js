@@ -1,15 +1,29 @@
 // test/pageobjects/clientsPage.js
-// Page object for Clients / 3rd Parties – list, create, edit, import, phone, contacts
+//
+// Key testids (from OUTPUT.TXT):
+//   search-input              – "Search Clients/3rd Parties..." input
+//   parties-create-button     – "Create" button (top right)
+//   menu-logout-button        – also present on this page
+//
+// The import button has no testid – found by text "Import".
+// The grid uses role="grid" / role="row" / role="gridcell".
 
-import { URLS, WAIT } from '../helpers/constants.js';
+import { WAIT } from '../helpers/constants.js';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default class ClientsPage {
+
+  // ── Selectors ─────────────────────────────────────────────────────────────
+  get searchInput()    { return $('[data-testid="search-input"]'); }
+  get createButton()   { return $('[data-testid="parties-create-button"]'); }
 
   // ── Navigation ─────────────────────────────────────────────────────────────
 
   async goToClients() {
-    await browser.url(URLS.CLIENTS);
+    await browser.url('https://app.thecasework.com/account/clientsParties');
     await browser.pause(WAIT.PAGE_LOAD);
   }
 
@@ -17,115 +31,86 @@ export default class ClientsPage {
     return await browser.execute(() => document.body.innerText || '');
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CLIENT LIST
-  // ══════════════════════════════════════════════════════════════════════════
-
-  async getSearchInput() {
-    const el = await $('input[placeholder*="Search" i]');
-    if (await el.isExisting()) return el;
-    return await $('input[type="text"]');
+  async getUrl() {
+    return await browser.getUrl();
   }
 
-  async searchClients(query) {
-    const input = await this.getSearchInput();
+  // ── Search ─────────────────────────────────────────────────────────────────
+
+  async search(term) {
+    const input = await this.searchInput;
+    await input.waitForDisplayed({ timeout: 10000 });
     await input.clearValue();
-    await input.setValue(query);
+    await input.setValue(term);
     await browser.pause(WAIT.LONG);
   }
 
   async clearSearch() {
-    const input = await this.getSearchInput();
-    await input.clearValue();
-    await browser.pause(WAIT.MEDIUM);
-    // Also click the X if it exists
-    const closeBtn = await $('[aria-label="clear" i], .clear-search');
-    if (await closeBtn.isExisting()) {
-      await closeBtn.click();
-      await browser.pause(WAIT.MEDIUM);
-    }
+    await this.goToClients();
   }
 
-  async getClientListText() {
-    const text = await this.getPageText();
-    return text;
+  // ── Grid ───────────────────────────────────────────────────────────────────
+
+  async getDataRows() {
+    const rows = await $$('[role="row"]');
+    return rows.slice(1); // skip header
   }
 
-  async clickClientByName(name) {
-    const allEls = await $$('a, div, span, tr, li');
-    for (const el of allEls) {
-      const text = await el.getText().catch(() => '');
-      if (text.trim() === name || text.includes(name)) {
-        await el.click();
-        await browser.pause(WAIT.PAGE_LOAD);
-        return;
-      }
-    }
+  async getGridCells() {
+    return await $$('[role="gridcell"]');
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CREATE CLIENT FORM
-  // ══════════════════════════════════════════════════════════════════════════
+  // ── Create form (Image 2) ──────────────────────────────────────────────────
 
-  async clickCreateButton() {
-    await this._clickButtonByText('Create');
+  async clickCreate() {
+    const btn = await this.createButton;
+    await btn.waitForDisplayed({ timeout: 10000 });
+    await btn.click();
+    await browser.pause(WAIT.LONG);
   }
 
   async isCreateFormOpen() {
     const text = await this.getPageText();
-    return text.includes('Create New Client') || text.includes('3rd Party Name');
+    return text.includes('Create New Client') || text.includes('3rd Party Name') || text.includes('Client / 3rd Party Name');
+  }
+
+  // The name input: placeholder="Enter the name of the Client / 3rd Party"
+  async getNameInput() {
+    const byPh = await $('input[placeholder*="name of the Client" i]');
+    if (await byPh.isExisting()) return byPh;
+    return await $('input[placeholder*="Party Name" i]');
   }
 
   async getFormField(placeholder) {
     const el = await $(`input[placeholder*="${placeholder}" i]`);
     if (await el.isExisting()) return el;
-    // Fallback: search by nearby label
-    const inputs = await $$('input');
-    for (const inp of inputs) {
-      const ph = await inp.getAttribute('placeholder').catch(() => '');
-      if (ph.toLowerCase().includes(placeholder.toLowerCase())) return inp;
-    }
     return null;
   }
 
-  async fillCreateForm({ name, address, address2, city, state, zip, url, phone }) {
+  async fillCreateForm({ name, address, city, state, zip, url }) {
     if (name) {
-      const el = await this.getFormField('Name') || await this.getFormField('Party');
+      const el = await this.getNameInput();
       if (el) { await el.clearValue(); await el.setValue(name); }
     }
-    if (address) {
-      const el = await this.getFormField('Address');
-      if (el) { await el.clearValue(); await el.setValue(address); }
-    }
-    if (address2) {
-      const el = await this.getFormField('Address 2');
-      if (el) { await el.clearValue(); await el.setValue(address2); }
-    }
-    if (city) {
-      const el = await this.getFormField('City');
-      if (el) { await el.clearValue(); await el.setValue(city); }
-    }
-    if (state) {
-      const el = await this.getFormField('State');
-      if (el) { await el.clearValue(); await el.setValue(state); }
-    }
-    if (zip) {
-      const el = await this.getFormField('Zip');
-      if (el) { await el.clearValue(); await el.setValue(zip); }
-    }
-    if (url) {
-      const el = await this.getFormField('Url');
-      if (el) { await el.clearValue(); await el.setValue(url); }
+    for (const [ph, val] of [
+      ['Address', address],
+      ['City',    city],
+      ['State',   state],
+      ['Zip',     zip],
+      ['Url',     url]
+    ]) {
+      if (val) {
+        const el = await this.getFormField(ph);
+        if (el) { await el.clearValue(); await el.setValue(val); }
+      }
     }
     await browser.pause(WAIT.SHORT);
   }
 
   async submitCreateForm() {
-    // Click the "Create" button inside the form (not the top-level one)
     const buttons = await $$('button');
     for (const btn of buttons) {
-      const text = await btn.getText().catch(() => '');
-      if (text.trim() === 'Create') {
+      if ((await btn.getText().catch(() => '')).trim() === 'Create') {
         await btn.click();
         await browser.pause(WAIT.PAGE_LOAD);
         return;
@@ -137,154 +122,127 @@ export default class ClientsPage {
     await this._clickButtonByText('Cancel');
   }
 
-  async isCreateButtonDisabled() {
+  // ── Phone Numbers section (inside Create form or Edit page) ───────────────
+  // Image 2 shows a phone "+" button under the "Phone Numbers" label
+
+  async hasPhoneNumbersSection() {
+    const text = await this.getPageText();
+    return text.includes('Phone Numbers');
+  }
+
+  async clickAddPhoneNumber() {
+    // The + icon button under "Phone Numbers" – no testid, find by proximity
     const buttons = await $$('button');
     for (const btn of buttons) {
-      const text = await btn.getText().catch(() => '');
-      if (text.trim() === 'Create') {
-        return await btn.getAttribute('disabled') !== null;
+      const aria  = (await btn.getAttribute('aria-label').catch(() => '')) || '';
+      const title = (await btn.getAttribute('title').catch(() => ''))      || '';
+      const text  = (await btn.getText().catch(() => '')).trim();
+      if (
+        aria.toLowerCase().includes('phone') ||
+        title.toLowerCase().includes('phone') ||
+        text === '+' || text === ''
+      ) {
+        // Check nearby sibling text for "Phone Numbers"
+        const html = await btn.getHTML(false).catch(() => '');
+        if (html.includes('phone') || html.includes('Phone')) {
+          await btn.click();
+          await browser.pause(WAIT.LONG);
+          return;
+        }
       }
     }
-    return false;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  EDIT CLIENT PAGE
-  // ══════════════════════════════════════════════════════════════════════════
-
-  async isEditPageOpen() {
-    const text = await this.getPageText();
-    return text.includes('Edit -') || text.includes('Party Name');
-  }
-
-  async getEditField(label) {
-    return this.getFormField(label);
-  }
-
-  async getEditFieldValue(label) {
-    const el = await this.getEditField(label);
-    if (el) return await el.getValue();
-    return '';
-  }
-
-  // ── Contacts section on edit page ──────────────────────────────────────────
-
-  async hasContactsSection() {
-    const text = await this.getPageText();
-    return text.includes('Contacts');
-  }
-
-  async clickAddContact() {
-    await this._clickButtonByText('Add Contact');
-  }
-
-  // ── Phone number modal ─────────────────────────────────────────────────────
-
-  async hasPhoneSection() {
-    const text = await this.getPageText();
-    return text.includes('Phone Numbers') || text.includes('Add Phone');
-  }
-
-  async openAddPhoneModal() {
-    // Look for an "Add" or "+" button near the Phone Numbers section
-    const allEls = await $$('button, a, span');
-    for (const el of allEls) {
-      const text = await el.getText().catch(() => '');
-      if (text.includes('Add Phone') || text.includes('add phone')) {
-        await el.click();
-        await browser.pause(WAIT.LONG);
-        return;
-      }
-    }
-    // Fallback: click a + icon near "Phone Numbers"
-    const buttons = await $$('button');
-    for (const btn of buttons) {
-      const label = await btn.getAttribute('aria-label').catch(() => '');
-      if (label.toLowerCase().includes('phone') || label.includes('add')) {
-        await btn.click();
-        await browser.pause(WAIT.LONG);
-        return;
+    // Broader fallback: click any small icon-only button that appears after
+    // the "Phone Numbers" heading
+    const allBtns = await $$('button');
+    for (let i = allBtns.length - 1; i >= 0; i--) {
+      const t = (await allBtns[i].getText().catch(() => '')).trim();
+      if (t === '') {
+        const displayed = await allBtns[i].isDisplayed().catch(() => false);
+        if (displayed) {
+          await allBtns[i].click();
+          await browser.pause(WAIT.LONG);
+          return;
+        }
       }
     }
   }
 
-  async isPhoneModalOpen() {
+  async isAddPhoneModalOpen() {
     const text = await this.getPageText();
-    return text.includes('Add Phone Number');
+    return text.includes('Add Phone Number') || text.includes('Phone Number') && text.includes('Submit');
   }
 
   async getPhoneNumberInput() {
     const el = await $('input[placeholder*="phone" i]');
     if (await el.isExisting()) return el;
-    // Fallback: look for input near "Phone number" label
     const inputs = await $$('input[type="text"], input[type="tel"]');
     return inputs.length > 0 ? inputs[0] : null;
   }
 
-  async getPhoneTypeSelect() {
-    const el = await $('select, [role="combobox"], input[placeholder*="Phone Type" i]');
+  async getPhoneTypeDropdown() {
+    const el = await $('[role="combobox"], select, input[placeholder*="Phone Type" i]');
     if (await el.isExisting()) return el;
     return null;
   }
 
   async getPrimaryToggle() {
-    // The "Primary?" toggle switch
-    const el = await $('input[type="checkbox"]');
-    if (await el.isExisting()) return el;
-    const toggle = await $('[role="switch"]');
-    if (await toggle.isExisting()) return toggle;
+    const sw = await $('[role="switch"]');
+    if (await sw.isExisting()) return sw;
+    const cb = await $('input[type="checkbox"]');
+    if (await cb.isExisting()) return cb;
     return null;
-  }
-
-  async fillPhoneModal(phoneNumber, phoneType = '') {
-    const phoneInput = await this.getPhoneNumberInput();
-    if (phoneInput) {
-      await phoneInput.clearValue();
-      await phoneInput.setValue(phoneNumber);
-    }
-    if (phoneType) {
-      const typeEl = await this.getPhoneTypeSelect();
-      if (typeEl) {
-        const tag = await typeEl.getTagName();
-        if (tag === 'select') {
-          await typeEl.selectByVisibleText(phoneType);
-        } else {
-          await typeEl.clearValue();
-          await typeEl.setValue(phoneType);
-        }
-      }
-    }
-    await browser.pause(WAIT.SHORT);
   }
 
   async submitPhoneModal() {
     await this._clickButtonByText('Submit');
+    await browser.pause(WAIT.MEDIUM);
   }
 
   async cancelPhoneModal() {
     await this._clickButtonByText('Cancel');
+    await browser.pause(WAIT.MEDIUM);
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  IMPORT MODAL
-  // ══════════════════════════════════════════════════════════════════════════
+  // ── Import modal (Image 1) ─────────────────────────────────────────────────
 
-  async clickImportButton() {
-    await this._clickButtonByText('Import');
+  async clickImport() {
+    // No testid – find by button text
+    const buttons = await $$('button');
+    for (const btn of buttons) {
+      const text = (await btn.getText().catch(() => '')).trim();
+      if (text === 'Import') {
+        await btn.click();
+        await browser.pause(WAIT.LONG);
+        return;
+      }
+    }
+    // Fallback: look for an element with Import text
+    const allEls = await $$('[role="button"], a, span');
+    for (const el of allEls) {
+      const text = (await el.getText().catch(() => '')).trim();
+      if (text === 'Import') {
+        await el.click();
+        await browser.pause(WAIT.LONG);
+        return;
+      }
+    }
   }
 
   async isImportModalOpen() {
     const text = await this.getPageText();
-    return text.includes('Import Clients') || text.includes('Upload a CSV');
+    return text.includes('Import Clients') || text.includes('Upload a CSV') || text.includes('Drag & drop');
   }
 
   async hasDownloadTemplateLink() {
-    const links = await $$('a');
-    for (const link of links) {
-      const text = await link.getText().catch(() => '');
-      if (text.toLowerCase().includes('download csv template')) return true;
+    const links = await $$('a, button');
+    for (const el of links) {
+      const text = (await el.getText().catch(() => '')).toLowerCase();
+      if (text.includes('download') && text.includes('csv')) return true;
+      if (text.includes('download csv template')) return true;
     }
-    return false;
+    // Also check page text
+    const pageText = (await this.getPageText()).toLowerCase();
+    return pageText.includes('download csv template') || pageText.includes('download csv');
   }
 
   async hasDragDropArea() {
@@ -292,35 +250,156 @@ export default class ClientsPage {
     return text.includes('Drag') || text.includes('drop') || text.includes('browse');
   }
 
-  async uploadCSV(filePath) {
-    // The import modal usually has a hidden <input type="file">
-    const fileInput = await $('input[type="file"]');
+  async uploadCSVFile(filePath) {
+    const resolved   = path.resolve(path.join(__dirname, '../../', filePath));
+    const fileInput  = await $('input[type="file"]');
     if (await fileInput.isExisting()) {
-      const resolvedPath = path.resolve(filePath);
-      const remotePath = await browser.uploadFile(resolvedPath);
+      const remotePath = await browser.uploadFile(resolved);
       await fileInput.setValue(remotePath);
       await browser.pause(WAIT.LONG);
+      return true;
     }
+    return false;
   }
 
-  async clickImportSubmit() {
-    // The "Import" button inside the modal
+  async clickImportSubmitInsideModal() {
     const buttons = await $$('button');
     for (const btn of buttons) {
-      const text = await btn.getText().catch(() => '');
-      if (text.trim() === 'Import') {
+      if ((await btn.getText().catch(() => '')).trim() === 'Import') {
         await btn.click();
         await browser.pause(WAIT.PAGE_LOAD);
-        return;
+        return true;
       }
     }
+    return false;
   }
 
   async cancelImportModal() {
     await this._clickButtonByText('Cancel');
+    await browser.pause(WAIT.MEDIUM);
   }
 
-  // ── Shared helper ──────────────────────────────────────────────────────────
+  // ── 3-dot menu (⋮) on a client row ────────────────────────────────────────
+
+  async clickThreeDotsForClient(clientName) {
+    await this.search(clientName);
+    await browser.pause(WAIT.MEDIUM);
+
+    // Hover over the row first so the 3-dot button appears
+    const rows = await $$('[role="row"]');
+    for (const row of rows) {
+      const rowText = (await row.getText().catch(() => '')).toLowerCase();
+      if (rowText.includes(clientName.toLowerCase())) {
+        await row.moveTo();
+        await browser.pause(WAIT.SHORT);
+        break;
+      }
+    }
+
+    // Click the 3-dot / more-options button in that row
+    const moreBtns = await $$('[aria-label*="more" i], [aria-label*="action" i], [aria-label*="option" i]');
+    if (moreBtns.length > 0) {
+      await moreBtns[0].click();
+      await browser.pause(WAIT.MEDIUM);
+      return true;
+    }
+    // Fallback: last button in the matching row
+    const rows2 = await $$('[role="row"]');
+    for (const row of rows2) {
+      const rowText = (await row.getText().catch(() => '')).toLowerCase();
+      if (rowText.includes(clientName.toLowerCase())) {
+        const btns = await row.$$('button');
+        if (btns.length > 0) {
+          await btns[btns.length - 1].click();
+          await browser.pause(WAIT.MEDIUM);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  async clickEditFromMenu() {
+    const items = await $$('[role="menuitem"], li, button, a');
+    for (const item of items) {
+      const text = (await item.getText().catch(() => '')).trim().toLowerCase();
+      if (text === 'edit') {
+        await item.click();
+        await browser.pause(WAIT.PAGE_LOAD);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async clickDeleteFromMenu() {
+    const items = await $$('[role="menuitem"], li, button, a');
+    for (const item of items) {
+      const text = (await item.getText().catch(() => '')).trim().toLowerCase();
+      if (text === 'delete') {
+        await item.click();
+        await browser.pause(WAIT.MEDIUM);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async confirmDeleteDialog() {
+    // Confirm dialog – look for "Yes", "Confirm", "Delete" button
+    const btns = await $$('button');
+    for (const btn of btns) {
+      const t = (await btn.getText().catch(() => '')).trim().toLowerCase();
+      if (t === 'yes' || t === 'confirm' || t === 'delete') {
+        await btn.click();
+        await browser.pause(WAIT.PAGE_LOAD);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ── Edit page (Image - edit view) ─────────────────────────────────────────
+
+  async isEditPageOpen() {
+    const text = await this.getPageText();
+    return text.includes('Edit') || text.includes('Party Name');
+  }
+
+  async getEditField(label) {
+    return await this.getFormField(label);
+  }
+
+  async getEditFieldValue(label) {
+    const el = await this.getEditField(label);
+    if (el) return await el.getValue().catch(() => '');
+    return '';
+  }
+
+  async hasContactsSection() {
+    const text = await this.getPageText();
+    return text.includes('Contacts');
+  }
+
+  async clickAddContact() {
+    const btns = await $$('button, a');
+    for (const btn of btns) {
+      const text = (await btn.getText().catch(() => '')).toLowerCase();
+      if (text.includes('add contact')) {
+        await btn.click();
+        await browser.pause(WAIT.LONG);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async hasPreviewSizes() {
+    const text = await this.getPageText();
+    return text.includes('Preview') || text.includes('large') || text.includes('small');
+  }
+
+  // ── Shared private helper ──────────────────────────────────────────────────
 
   async _clickButtonByText(label) {
     const buttons = await $$('button');

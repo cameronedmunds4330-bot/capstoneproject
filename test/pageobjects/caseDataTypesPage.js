@@ -1,22 +1,23 @@
+// test/pageobjects/caseDataTypesPage.js
+//
+// Key testids (from OUTPUT.TXT):
+//   account-settings-case-data-tab           – tab button
+//   (case-data-types panel has no testids – use text-based selectors inside)
 
-import { URLS, WAIT } from '../helpers/constants.js';
+import { WAIT } from '../helpers/constants.js';
 
 export default class CaseDataTypesPage {
 
   // ── Navigation ─────────────────────────────────────────────────────────────
 
   async goToCaseDataTypes() {
-    await browser.url(URLS.SETTINGS);
+    await browser.url('https://app.thecasework.com/account/settings');
     await browser.pause(WAIT.PAGE_LOAD);
-    const allEls = await $$('a, button, [role="tab"], li, span');
-    for (const el of allEls) {
-      const text = await el.getText().catch(() => '');
-      if (text.trim() === 'Case Data Types') {
-        await el.click();
-        await browser.pause(WAIT.LONG);
-        return;
-      }
-    }
+    // Click the Case Data Types tab using its testid
+    const tab = await $('[data-testid="account-settings-case-data-tab"]');
+    await tab.waitForDisplayed({ timeout: 10000 });
+    await tab.click();
+    await browser.pause(WAIT.LONG);
   }
 
   async getPageText() {
@@ -28,12 +29,15 @@ export default class CaseDataTypesPage {
   // ══════════════════════════════════════════════════════════════════════════
 
   async getCaseTypeInput() {
-    const el = await $('input[placeholder*="Case Type" i]');
-    if (await el.isExisting()) return el;
-    return await $('input[type="text"]');
+    // placeholder="New Case Type" or similar
+    const byPh = await $('input[placeholder*="Case Type" i]');
+    if (await byPh.isExisting()) return byPh;
+    const all = await $$('input[type="text"]');
+    return all[0] || null;
   }
 
   async getCaseTypeAddButton() {
+    // First "Add" button on the page
     const buttons = await $$('button');
     for (const btn of buttons) {
       if ((await btn.getText().catch(() => '')).trim() === 'Add') return btn;
@@ -41,33 +45,22 @@ export default class CaseDataTypesPage {
     return null;
   }
 
-  async typeCaseType(value) {
+  async addCaseType(value) {
     const input = await this.getCaseTypeInput();
     await input.clearValue();
     await input.setValue(value);
     await browser.pause(WAIT.SHORT);
-  }
-
-  async addCaseType(value) {
-    await this.typeCaseType(value);
     const btn = await this.getCaseTypeAddButton();
-    if (btn) {
-      await btn.click();
-      await browser.pause(WAIT.MEDIUM);
-    }
-  }
-
-  async getCaseTypeList() {
-    const text = await this.getPageText();
-    const section = text.split('Case Statuses')[0] || '';
-    return section;
+    await btn.click();
+    await browser.pause(WAIT.MEDIUM);
   }
 
   async deleteCaseType(typeName) {
-    const allEls = await $$('span, div, li');
+    // Each tag has a close/delete button next to it
+    const allEls = await $$('span, div, li, button');
     for (const el of allEls) {
-      const text = await el.getText().catch(() => '');
-      if (text.trim() === typeName) {
+      const text = (await el.getText().catch(() => '')).trim();
+      if (text === typeName) {
         const parent = await el.$('..');
         const closeBtn = await parent.$('button');
         if (closeBtn && await closeBtn.isExisting()) {
@@ -80,17 +73,31 @@ export default class CaseDataTypesPage {
     return false;
   }
 
+  async caseTypeListContains(value) {
+    const text = await this.getPageText();
+    // Only look in the Case Types section (before Case Statuses)
+    const section = text.split('Case Statuses')[0] || text;
+    return section.includes(value);
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   //  CASE STATUSES
   // ══════════════════════════════════════════════════════════════════════════
 
   async getGroupByCheckbox() {
-    return await $('input[type="checkbox"]');
+    // The checkbox has no testid; find by role or type
+    const cb = await $('input[type="checkbox"]');
+    if (await cb.isExisting()) return cb;
+    const sw = await $('[role="checkbox"]');
+    return sw;
   }
 
   async isGroupByChecked() {
     const cb = await this.getGroupByCheckbox();
-    return await cb.isSelected();
+    return await cb.isSelected().catch(async () => {
+      const aria = await cb.getAttribute('aria-checked');
+      return aria === 'true';
+    });
   }
 
   async toggleGroupByCheckbox() {
@@ -104,12 +111,12 @@ export default class CaseDataTypesPage {
     return text.includes(groupName);
   }
 
-  // Click the + button next to a status group
+  // Click the ⊞ / + button next to a status group label
   async clickPlusForGroup(groupName) {
     const groupOrder = ['New', 'Active', 'Completed', 'Closed', 'Removed'];
     const idx = groupOrder.indexOf(groupName);
 
-    // Strategy 1: Try aria-label match
+    // Strategy 1: aria-label contains the group name
     const ariaMatches = await $$(`[aria-label*="${groupName}" i]`);
     for (const el of ariaMatches) {
       if ((await el.getTagName()) === 'button') {
@@ -119,7 +126,7 @@ export default class CaseDataTypesPage {
       }
     }
 
-    // Strategy 2: Collect all icon-only / + buttons in DOM order, pick by index
+    // Strategy 2: collect all icon-only / add buttons in DOM order
     const allBtns = await $$('button');
     const plusBtns = [];
     for (const btn of allBtns) {
@@ -142,13 +149,13 @@ export default class CaseDataTypesPage {
     return false;
   }
 
-  // ── Dialog detection — polls via innerText ─────────────────────────────────
+  // ── Dialog polling ────────────────────────────────────────────────────────
 
   async waitForDialog(ms = 8000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
-      const dialog = await $('[role="dialog"]');
-      if (await dialog.isExisting()) return true;
+      const dlg = await $('[role="dialog"]');
+      if (await dlg.isExisting()) return true;
       const text = await browser.execute(() => document.body.innerText || '');
       if (text.includes('System Status') || text.includes('Create new')) return true;
       await browser.pause(400);
@@ -157,22 +164,22 @@ export default class CaseDataTypesPage {
   }
 
   async isDialogOpen() {
-    const dialog = await $('[role="dialog"]');
-    if (await dialog.isExisting()) return true;
+    const dlg = await $('[role="dialog"]');
+    if (await dlg.isExisting()) return true;
     const text = await browser.execute(() => document.body.innerText || '');
     return text.includes('System Status') || text.includes('Create new');
   }
 
-  // ── Dialog fields (with polling for slow renders) ──────────────────────────
+  // ── Dialog fields ─────────────────────────────────────────────────────────
 
   async getStatusInput() {
     const start = Date.now();
     while (Date.now() - start < 5000) {
-      const byPlaceholder = await $('input[placeholder*="Enter the status" i]');
-      if (await byPlaceholder.isExisting()) return byPlaceholder;
-      const dialog = await $('[role="dialog"]');
-      if (await dialog.isExisting()) {
-        const inp = await dialog.$('input');
+      const byPh = await $('input[placeholder*="Enter the status" i]');
+      if (await byPh.isExisting()) return byPh;
+      const dlg = await $('[role="dialog"]');
+      if (await dlg.isExisting()) {
+        const inp = await dlg.$('input');
         if (await inp.isExisting()) return inp;
       }
       await browser.pause(300);
@@ -211,7 +218,10 @@ export default class CaseDataTypesPage {
     if (cancel && await cancel.isDisplayed().catch(() => false)) {
       await cancel.click();
       await browser.pause(WAIT.MEDIUM);
+      return;
     }
+    await browser.keys('Escape');
+    await browser.pause(WAIT.MEDIUM);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -219,8 +229,8 @@ export default class CaseDataTypesPage {
   // ══════════════════════════════════════════════════════════════════════════
 
   async getExpenseTypeInput() {
-    const el = await $('input[placeholder*="Expense Type" i]');
-    if (await el.isExisting()) return el;
+    const byPh = await $('input[placeholder*="Expense Type" i]');
+    if (await byPh.isExisting()) return byPh;
     const all = await $$('input[type="text"]');
     return all.length >= 2 ? all[1] : all[0];
   }
@@ -234,33 +244,21 @@ export default class CaseDataTypesPage {
     return adds.length >= 2 ? adds[1] : adds[0];
   }
 
-  async typeExpenseType(value) {
+  async addExpenseType(value) {
     const input = await this.getExpenseTypeInput();
     await input.clearValue();
     await input.setValue(value);
     await browser.pause(WAIT.SHORT);
-  }
-
-  async addExpenseType(value) {
-    await this.typeExpenseType(value);
     const btn = await this.getExpenseTypeAddButton();
-    if (btn) {
-      await btn.click();
-      await browser.pause(WAIT.MEDIUM);
-    }
-  }
-
-  async getExpenseTypeList() {
-    const text = await this.getPageText();
-    const section = text.split('Expense Types')[1] || '';
-    return section;
+    await btn.click();
+    await browser.pause(WAIT.MEDIUM);
   }
 
   async deleteExpenseType(typeName) {
-    const allEls = await $$('span, div, li');
+    const allEls = await $$('span, div, li, button');
     for (const el of allEls) {
-      const text = await el.getText().catch(() => '');
-      if (text.trim() === typeName) {
+      const text = (await el.getText().catch(() => '')).trim();
+      if (text === typeName) {
         const parent = await el.$('..');
         const closeBtn = await parent.$('button');
         if (closeBtn && await closeBtn.isExisting()) {
@@ -271,5 +269,11 @@ export default class CaseDataTypesPage {
       }
     }
     return false;
+  }
+
+  async expenseTypeListContains(value) {
+    const text = await this.getPageText();
+    const section = text.split('Expense Types')[1] || '';
+    return section.includes(value);
   }
 }
